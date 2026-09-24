@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Determinar nombre de la rama
+        id: rama
+        shell: bash
+        run: |
+          if [ -n "${{ github.head_ref }}" ]; then
+            BRANCH="${{ github.head_ref }}"
+          else
+            BRANCH=$(git log -1 --pretty=%s | grep -oP '(?<=from [^/]+/)\S+' || true)
+            if [ -z "$BRANCH" ]; then
+              BRANCH="manual"
+            fi
+          fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Actualizar README
+        shell: bash
+        run: |
+          echo "Añadida feature: ${{ steps.rama.outputs.branch }}" >> README.md
+
+      - name: Commit y push a develop
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "CI: registrar feature ${{ steps.rama.outputs.branch }} en README [skip ci]" || echo "Sin cambios que confirmar"
+          git push origin develop
+
+  validate-dev:
+    needs: update-readme
+    runs-on: self-hosted
+    steps:
+      - name: Comparar DEV_TOKEN con LOCAL_DEV_TOKEN
+        shell: powershell
+        env:
+          DEV_TOKEN: ${{ secrets.DEV_TOKEN }}
+        run: |
+          if ($env:DEV_TOKEN -eq $env:LOCAL_DEV_TOKEN) {
+            Write-Host "Los tokens coinciden"
+          } else {
+            Write-Host "Los tokens NO coinciden"
+            exit 1
+          }
